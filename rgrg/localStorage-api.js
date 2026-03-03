@@ -27,6 +27,13 @@ let SYNC_SERVER_URL = null;
         }
       }
     }
+    
+    // Логируем для отладки
+    if (SYNC_SERVER_URL) {
+      console.log('✅ URL сервера синхронизации определен:', SYNC_SERVER_URL);
+    } else {
+      console.log('⚠️ URL сервера синхронизации не определен, работаем только локально');
+    }
   }
 })();
 
@@ -97,21 +104,30 @@ function saveToStorage(key, data) {
 
 // Функции для работы со сделками
 async function loadDeals() {
-  // Сначала пытаемся загрузить с сервера для синхронизации
-  const serverData = await loadFromServer('deals');
-  if (serverData && Array.isArray(serverData)) {
-    // Сохраняем локально для быстрого доступа
-    saveToStorage(STORAGE_KEYS.DEALS, serverData);
-    return serverData;
+  try {
+    // Сначала пытаемся загрузить с сервера для синхронизации
+    const serverData = await loadFromServer('deals');
+    if (serverData && Array.isArray(serverData)) {
+      // Сохраняем локально для быстрого доступа
+      saveToStorage(STORAGE_KEYS.DEALS, serverData);
+      return serverData;
+    }
+  } catch (error) {
+    console.log('Сервер недоступен, используем localStorage:', error);
   }
   // Если сервер недоступен, используем localStorage
   return loadFromStorage(STORAGE_KEYS.DEALS, []);
 }
 
 async function saveDeals(deals) {
+  // Сначала сохраняем локально для быстрого доступа
   const saved = saveToStorage(STORAGE_KEYS.DEALS, deals);
-  // Синхронизируем с сервером в фоне
-  syncWithServer('deals', deals).catch(() => {});
+  // Синхронизируем с сервером в фоне (не блокируем выполнение)
+  if (SYNC_SERVER_URL) {
+    syncWithServer('deals', deals).catch(function(err) {
+      console.log('Ошибка синхронизации сделок с сервером (работаем локально):', err);
+    });
+  }
   return saved;
 }
 
