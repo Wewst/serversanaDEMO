@@ -1,8 +1,68 @@
-// Общий API для работы с localStorage (заменяет серверные функции)
-// Все данные хранятся локально, уведомления отключены
+// Общий API для работы с localStorage и синхронизацией через сервер
+// Данные хранятся локально для быстрого доступа и синхронизируются с сервером
 
 const DEAL_AMOUNT_ADMIN = 9500;
 const DEAL_AMOUNT_TEAM = 2000;
+
+// URL сервера для синхронизации (автоматически определяется или можно задать вручную)
+// Если не задан, используется только localStorage
+let SYNC_SERVER_URL = null;
+
+// Инициализация URL сервера
+(function() {
+  // Пытаемся определить URL из скрипта или из переменной окружения
+  if (typeof window !== 'undefined') {
+    // Проверяем, есть ли переменная с URL сервера
+    if (window.LOCAL_STORAGE_API_URL) {
+      // Извлекаем базовый URL (убираем /localStorage-api.js)
+      SYNC_SERVER_URL = window.LOCAL_STORAGE_API_URL.replace('/localStorage-api.js', '');
+    } else {
+      // Пытаемся определить из текущего скрипта
+      const scripts = document.getElementsByTagName('script');
+      for (let i = 0; i < scripts.length; i++) {
+        const src = scripts[i].src;
+        if (src && src.includes('localStorage-api.js')) {
+          SYNC_SERVER_URL = src.replace('/localStorage-api.js', '');
+          break;
+        }
+      }
+    }
+  }
+})();
+
+// Функция синхронизации с сервером
+async function syncWithServer(key, data) {
+  if (!SYNC_SERVER_URL) return false;
+  
+  try {
+    const endpoint = '/api/' + key.toLowerCase().replace(/([A-Z])/g, '-$1').toLowerCase();
+    const response = await fetch(SYNC_SERVER_URL + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return response.ok;
+  } catch (error) {
+    console.error('Ошибка синхронизации с сервером:', error);
+    return false;
+  }
+}
+
+// Функция загрузки с сервера
+async function loadFromServer(key) {
+  if (!SYNC_SERVER_URL) return null;
+  
+  try {
+    const endpoint = '/api/' + key.toLowerCase().replace(/([A-Z])/g, '-$1').toLowerCase();
+    const response = await fetch(SYNC_SERVER_URL + endpoint);
+    if (response.ok) {
+      return await response.json();
+    }
+  } catch (error) {
+    console.error('Ошибка загрузки с сервера:', error);
+  }
+  return null;
+}
 
 // Ключи для localStorage
 const STORAGE_KEYS = {
@@ -36,57 +96,118 @@ function saveToStorage(key, data) {
 }
 
 // Функции для работы со сделками
-function loadDeals() {
+async function loadDeals() {
+  // Сначала пытаемся загрузить с сервера для синхронизации
+  const serverData = await loadFromServer('deals');
+  if (serverData && Array.isArray(serverData)) {
+    // Сохраняем локально для быстрого доступа
+    saveToStorage(STORAGE_KEYS.DEALS, serverData);
+    return serverData;
+  }
+  // Если сервер недоступен, используем localStorage
   return loadFromStorage(STORAGE_KEYS.DEALS, []);
 }
 
-function saveDeals(deals) {
-  return saveToStorage(STORAGE_KEYS.DEALS, deals);
+async function saveDeals(deals) {
+  const saved = saveToStorage(STORAGE_KEYS.DEALS, deals);
+  // Синхронизируем с сервером в фоне
+  syncWithServer('deals', deals).catch(() => {});
+  return saved;
 }
 
 // Функции для работы с заданиями
-function loadTasks() {
+async function loadTasks() {
+  const serverData = await loadFromServer('tasks');
+  if (serverData && Array.isArray(serverData)) {
+    saveToStorage(STORAGE_KEYS.TASKS, serverData);
+    return serverData;
+  }
   return loadFromStorage(STORAGE_KEYS.TASKS, []);
 }
 
-function saveTasks(tasks) {
-  return saveToStorage(STORAGE_KEYS.TASKS, tasks);
+async function saveTasks(tasks) {
+  const saved = saveToStorage(STORAGE_KEYS.TASKS, tasks);
+  syncWithServer('tasks', tasks).catch(() => {});
+  return saved;
 }
 
 // Функции для работы с целями
-function loadGoals() {
+async function loadGoals() {
+  const serverData = await loadFromServer('goals');
+  if (serverData && Array.isArray(serverData)) {
+    saveToStorage(STORAGE_KEYS.GOALS, serverData);
+    return serverData;
+  }
   return loadFromStorage(STORAGE_KEYS.GOALS, []);
 }
 
-function saveGoals(goals) {
-  return saveToStorage(STORAGE_KEYS.GOALS, goals);
+async function saveGoals(goals) {
+  const saved = saveToStorage(STORAGE_KEYS.GOALS, goals);
+  syncWithServer('goals', goals).catch(() => {});
+  return saved;
 }
 
 // Функции для работы с пользователями
-function loadUsers() {
+async function loadUsers() {
+  const serverData = await loadFromServer('users');
+  if (serverData && typeof serverData === 'object') {
+    saveToStorage(STORAGE_KEYS.USERS, serverData);
+    return serverData;
+  }
   return loadFromStorage(STORAGE_KEYS.USERS, {});
 }
 
-function saveUsers(users) {
-  return saveToStorage(STORAGE_KEYS.USERS, users);
+async function saveUsers(users) {
+  const saved = saveToStorage(STORAGE_KEYS.USERS, users);
+  syncWithServer('users', users).catch(() => {});
+  return saved;
 }
 
 // Функции для работы с ID админа
-function loadAdminId() {
+async function loadAdminId() {
+  if (SYNC_SERVER_URL) {
+    try {
+      const response = await fetch(SYNC_SERVER_URL + '/api/admin-id');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.adminId) {
+          saveToStorage(STORAGE_KEYS.ADMIN_ID, data.adminId);
+          return data.adminId;
+        }
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки adminId с сервера:', error);
+    }
+  }
   return loadFromStorage(STORAGE_KEYS.ADMIN_ID, null);
 }
 
-function saveAdminId(userId) {
-  return saveToStorage(STORAGE_KEYS.ADMIN_ID, userId);
+async function saveAdminId(userId) {
+  const saved = saveToStorage(STORAGE_KEYS.ADMIN_ID, userId);
+  if (SYNC_SERVER_URL) {
+    fetch(SYNC_SERVER_URL + '/api/admin-id', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adminId: userId })
+    }).catch(() => {});
+  }
+  return saved;
 }
 
 // Функции для работы с выводами бонусов
-function loadBonusWithdrawals() {
+async function loadBonusWithdrawals() {
+  const serverData = await loadFromServer('bonus-withdrawals');
+  if (serverData && typeof serverData === 'object') {
+    saveToStorage(STORAGE_KEYS.BONUS_WITHDRAWALS, serverData);
+    return serverData;
+  }
   return loadFromStorage(STORAGE_KEYS.BONUS_WITHDRAWALS, {});
 }
 
-function saveBonusWithdrawals(withdrawals) {
-  return saveToStorage(STORAGE_KEYS.BONUS_WITHDRAWALS, withdrawals);
+async function saveBonusWithdrawals(withdrawals) {
+  const saved = saveToStorage(STORAGE_KEYS.BONUS_WITHDRAWALS, withdrawals);
+  syncWithServer('bonus-withdrawals', withdrawals).catch(() => {});
+  return saved;
 }
 
 // Вспомогательные функции для расчетов
@@ -120,9 +241,9 @@ function calculateDeductions(amount) {
 }
 
 // Получение данных суммы для админского приложения (с вычетами)
-function getSumData() {
+async function getSumData() {
   try {
-    const deals = loadDeals();
+    const deals = await loadDeals();
     const now = new Date();
     const todayStart = startOfDay(now);
     const monthStart = startOfMonth(now);
@@ -186,9 +307,9 @@ function getSumData() {
 }
 
 // Получение данных суммы для командного приложения (без вычетов, с персональной суммой)
-function getTeamSumData(userId) {
+async function getTeamSumData(userId) {
   try {
-    const deals = loadDeals();
+    const deals = await loadDeals();
     const now = new Date();
     const todayStart = startOfDay(now);
     const monthStart = startOfMonth(now);
@@ -221,7 +342,7 @@ function getTeamSumData(userId) {
     
     // Добавляем выведенные бонусы в личный доход
     if (userId) {
-      const users = loadUsers();
+      const users = await loadUsers();
       const userData = users[String(userId)];
       if (userData && userData.withdrawnBonuses) {
         totalPersonal += userData.withdrawnBonuses || 0;
@@ -246,11 +367,11 @@ function getTeamSumData(userId) {
 }
 
 // Получение турнирной таблицы (по подтвержденным сделкам и заданиям)
-function getLeaderboard() {
+async function getLeaderboard() {
   try {
-    const deals = loadDeals();
-    const tasks = loadTasks();
-    const users = loadUsers();
+    const deals = await loadDeals();
+    const tasks = await loadTasks();
+    const users = await loadUsers();
     const userStats = {};
     
     // Подсчитываем только успешные сделки (исключая бонусы)
@@ -312,8 +433,15 @@ function getLeaderboard() {
   }
 }
 
-// Экспорт API для использования в HTML файлах
+  // Экспорт API для использования в HTML файлах
 window.LocalStorageAPI = {
+  // URL сервера для синхронизации (можно задать вручную)
+  setSyncServerUrl: function(url) {
+    SYNC_SERVER_URL = url;
+  },
+  getSyncServerUrl: function() {
+    return SYNC_SERVER_URL;
+  },
   // Константы
   DEAL_AMOUNT_ADMIN,
   DEAL_AMOUNT_TEAM,
