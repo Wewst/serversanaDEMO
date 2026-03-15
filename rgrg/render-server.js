@@ -49,6 +49,16 @@ function saveData() {
 // Загружаем данные при старте
 loadData();
 
+// Обработчик для OVERSEER (чтобы сервер не засыпал на Render)
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    service: 'localStorage-api-server',
+    timestamp: new Date().toISOString(),
+    message: 'Server is running and ready'
+  });
+});
+
 // Раздаем статические файлы из текущей директории
 app.use(express.static(__dirname));
 
@@ -175,4 +185,3 @@ app.listen(PORT, () => {
   console.log('📡 API для синхронизации данных доступен по адресу:');
   console.log(`   http://localhost:${PORT}/api/deals`);
 });
-
